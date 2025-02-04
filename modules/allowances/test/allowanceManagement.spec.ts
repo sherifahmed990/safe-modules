@@ -73,7 +73,7 @@ describe('AllowanceModule allowanceManagement', () => {
     await execSafeTransaction(safe, await allowanceModule.addDelegate.populateTransaction(alice.address), owner)
 
     // add allowance
-    await execSafeTransaction(safe, await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 1000, 0, 0), owner)
+    await execSafeTransaction(safe, await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 1000, 0, 0, []), owner)
 
     expect(1000).to.equal(await token.balanceOf(safeAddress))
     expect(0).to.equal(await token.balanceOf(bob.address))
@@ -115,7 +115,7 @@ describe('AllowanceModule allowanceManagement', () => {
 
     // does not work without a delegate previously set
     await expect(
-      execSafeTransaction(safe, await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, 0, 0), owner),
+      execSafeTransaction(safe, await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, 0, 0, []), owner),
     ).to.be.revertedWith('GS013')
 
     // does not work without an allowance

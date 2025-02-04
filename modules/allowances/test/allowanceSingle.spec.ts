@@ -23,7 +23,7 @@ describe('AllowanceModule allowanceSingle', () => {
     await execSafeTransaction(safe, await allowanceModule.addDelegate.populateTransaction(alice.address), owner)
 
     // create an allowance for alice
-    await execSafeTransaction(safe, await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, 0, 0), owner)
+    await execSafeTransaction(safe, await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, 0, 0, [alice.address, bob.address]), owner)
 
     // ensure delegates are well configured
     const { results } = await allowanceModule.getDelegates(safeAddress, 0, 10)
@@ -33,24 +33,46 @@ describe('AllowanceModule allowanceSingle', () => {
     expect(await allowanceModule.getTokens(safeAddress, alice.address)).to.deep.equal([tokenAddress])
 
     // load an existing allowance
-    let [amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, tokenAddress)
+    let [amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, tokenAddress)
     expect(100).to.equal(amount)
     expect(0).to.equal(spent)
     expect(0).to.equal(minReset)
     expect(0).to.not.equal(lastReset) // this should be set to init time
     expect(1).to.equal(nonce)
+    expect(1).to.equal(allowedReceiversId)
 
     // load an non existing allowance - bob has none
-    ;[amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, bob.address, tokenAddress)
+    ;[amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, bob.address, tokenAddress)
     expect(0).to.equal(amount)
     expect(0).to.equal(spent)
     expect(0).to.equal(minReset)
     expect(0).to.equal(lastReset)
     expect(0).to.equal(nonce)
+    expect(0).to.equal(allowedReceiversId)
 
     expect(1000).to.equal(await token.balanceOf(safeAddress))
     expect(0).to.equal(await token.balanceOf(alice.address))
     expect(0).to.equal(await token.balanceOf(bob.address))
+
+    // will work when 'to' is an allowed spender
+    await execAllowanceTransfer(allowanceModule, {
+      safe: safeAddress,
+      token: tokenAddress,
+      to: alice.address,
+      amount: 40,
+      spender: alice,
+    })
+
+    // does not work when 'to' is not an allowed spender
+    await expect(
+      execAllowanceTransfer(allowanceModule, {
+        safe: safeAddress,
+        token: tokenAddress,
+        to: "0x0000000000000000000000000000000000000001",
+        amount: 60,
+        spender: alice,
+      })
+    ).to.be.revertedWith('to is not in allowed receivers')
 
     await execAllowanceTransfer(allowanceModule, {
       safe: safeAddress,
@@ -60,32 +82,34 @@ describe('AllowanceModule allowanceSingle', () => {
       spender: alice,
     })
 
-    expect(940).to.equal(await token.balanceOf(safeAddress))
-    expect(0).to.equal(await token.balanceOf(alice.address))
+    expect(900).to.equal(await token.balanceOf(safeAddress))
+    expect(40).to.equal(await token.balanceOf(alice.address))
     expect(60).to.equal(await token.balanceOf(bob.address))
 
     // load Alice's Allowance
-    ;[amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, tokenAddress)
+    ;[amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, tokenAddress)
 
     // expect the last transfer to be reflected
     expect(100).to.equal(amount)
-    expect(60).to.equal(spent)
+    expect(100).to.equal(spent)
     expect(0).to.equal(minReset)
     expect(lastReset > 0).to.be.true
-    expect(2).to.equal(nonce)
+    expect(3).to.equal(nonce)
+    expect(1).to.equal(allowedReceiversId)
 
     // remove Alice's as spender
     await execSafeTransaction(safe, await allowanceModule.removeDelegate.populateTransaction(alice.address, true), owner)
 
     // load Alice's Allowance after delegate removal
-    ;[amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, tokenAddress)
+    ;[amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, tokenAddress)
 
     // everything zeroed, except nonce
     expect(0).to.equal(amount)
     expect(0).to.equal(spent)
     expect(0).to.equal(minReset)
     expect(0).to.equal(lastReset)
-    expect(2).to.equal(nonce)
+    expect(3).to.equal(nonce)
+    expect(0).to.equal(allowedReceiversId)
   })
 
   it('Execute multiple ether allowance with delegate', async () => {
@@ -121,17 +145,19 @@ describe('AllowanceModule allowanceSingle', () => {
         OneEther,
         0,
         0,
+        [] // allowance can be sent to any address if allowedReceivers is empty
       ),
       owner,
     )
 
     // load an existing allowance
-    let [amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, ZeroAddress)
+    let [amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, ZeroAddress)
     expect(OneEther).to.equal(amount)
     expect(0).to.equal(spent)
     expect(0).to.equal(minReset)
     expect(0).to.not.equal(lastReset) // this should be set to inti time
     expect(1).to.equal(nonce)
+    expect(0).to.equal(allowedReceiversId) // should be zero if allowedReceivers is empty
 
     expect(OneEther).to.equal(await provider.getBalance(safeAddress))
     expect(0).to.equal(await provider.getBalance(bob))
@@ -149,7 +175,7 @@ describe('AllowanceModule allowanceSingle', () => {
     expect(parseUnits('0.001', 'ether')).to.equal(await provider.getBalance(bob))
 
     // load Alice's Allowance
-    ;[amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, ZeroAddress)
+    ;[amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, ZeroAddress)
 
     // expect the last transfer to be reflected
     expect(parseUnits('1', 'ether')).to.equal(amount)
@@ -157,6 +183,7 @@ describe('AllowanceModule allowanceSingle', () => {
     expect(0).to.equal(minReset)
     expect(lastReset > 0).to.be.true
     expect(2).to.equal(nonce)
+    expect(0).to.equal(allowedReceiversId) // should be zero if allowedReceivers is empty
 
     // send 0.001 more
     await execAllowanceTransfer(allowanceModule, {
@@ -171,7 +198,7 @@ describe('AllowanceModule allowanceSingle', () => {
     expect(parseUnits('0.002', 'ether')).to.equal(await provider.getBalance(bob))
 
     // load Alice's Allowance
-    ;[amount, spent, minReset, lastReset, nonce] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, ZeroAddress)
+    ;[amount, spent, minReset, lastReset, nonce, allowedReceiversId] = await allowanceModule.getTokenAllowance(safeAddress, alice.address, ZeroAddress)
 
     // expect the last transfer to be reflected
     expect(parseUnits('1', 'ether')).to.equal(amount)
@@ -179,5 +206,6 @@ describe('AllowanceModule allowanceSingle', () => {
     expect(0).to.equal(minReset)
     expect(lastReset > 0).to.be.true
     expect(3).to.equal(nonce)
+    expect(0).to.equal(allowedReceiversId) // should be zero if allowedReceivers is empty
   })
 })

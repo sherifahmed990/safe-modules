@@ -34,7 +34,7 @@ describe('AllowanceModule allowanceRecurring', () => {
 
     await execSafeTransaction(
       safe,
-      await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, configResetPeriod, configResetBase),
+      await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, configResetPeriod, configResetBase, []),
       owner,
     )
 
@@ -148,7 +148,7 @@ describe('AllowanceModule allowanceRecurring', () => {
     await expect(
       execSafeTransaction(
         safe,
-        await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, configResetPeriod, configResetBase),
+        await allowanceModule.setAllowance.populateTransaction(alice.address, tokenAddress, 100, configResetPeriod, configResetBase, []),
         owner,
       ),
     ).to.be.reverted

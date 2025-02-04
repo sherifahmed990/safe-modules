@@ -31,6 +31,7 @@ contract AllowanceModule is SignatureDecoder {
     // keccak256(
     //     "AllowanceTransfer(address safe,address token,address to,uint96 amount,address paymentToken,uint96 payment,uint16 nonce)"
     // );
+    uint256 allowedReceiversIdCounter = 0;
 
     // Safe -> Delegate -> Allowance
     mapping(address => mapping(address => mapping(address => Allowance))) public allowances;
@@ -40,6 +41,8 @@ contract AllowanceModule is SignatureDecoder {
     mapping(address => uint48) public delegatesStart;
     // Safe -> Delegates double linked list
     mapping(address => mapping(uint48 => Delegate)) public delegates;
+    //allowedReceiversId -> receiver -> isAllowed
+    mapping(uint256 => mapping(address => bool)) public isAllowedReceivers;
 
     // We use a double linked list for the delegates. The id is the first 6 bytes.
     // To double check the address in case of collision, the address is part of the struct.
@@ -49,20 +52,21 @@ contract AllowanceModule is SignatureDecoder {
         uint48 next;
     }
 
-    // The allowance info is optimized to fit into one word of storage.
     struct Allowance {
         uint96 amount;
         uint96 spent;
         uint16 resetTimeMin; // Maximum reset time span is 65k minutes
         uint32 lastResetMin;
         uint16 nonce;
+        uint256 allowedReceiversId; // 0 means all allowed
     }
 
     event AddDelegate(address indexed safe, address delegate);
     event RemoveDelegate(address indexed safe, address delegate);
     event ExecuteAllowanceTransfer(address indexed safe, address delegate, address token, address to, uint96 value, uint16 nonce);
     event PayAllowanceTransfer(address indexed safe, address delegate, address paymentToken, address paymentReceiver, uint96 payment);
-    event SetAllowance(address indexed safe, address delegate, address token, uint96 allowanceAmount, uint16 resetTime);
+    event SetAllowance(address indexed safe, address delegate, address token, uint96 allowanceAmount, uint16 resetTime, uint256 allowedReceiversId);
+    event AllowedReceivers(uint256 allowedReceiversId, address[] allowedReceivers);
     event ResetAllowance(address indexed safe, address delegate, address token);
     event DeleteAllowance(address indexed safe, address delegate, address token);
 
@@ -72,7 +76,8 @@ contract AllowanceModule is SignatureDecoder {
     /// @param allowanceAmount allowance in smallest token unit.
     /// @param resetTimeMin Time after which the allowance should reset
     /// @param resetBaseMin Time based on which the reset time should be increased
-    function setAllowance(address delegate, address token, uint96 allowanceAmount, uint16 resetTimeMin, uint32 resetBaseMin) public {
+    /// @param allowedReceivers List of addresses allowed to receive the allowance
+    function setAllowance(address delegate, address token, uint96 allowanceAmount, uint16 resetTimeMin, uint32 resetBaseMin, address[] memory allowedReceivers) public {
         require(delegate != address(0), "delegate != address(0)");
         require(
             delegates[msg.sender][uint48(delegate)].delegate == delegate,
@@ -96,8 +101,17 @@ contract AllowanceModule is SignatureDecoder {
         }
         allowance.resetTimeMin = resetTimeMin;
         allowance.amount = allowanceAmount;
+        if(allowedReceivers.length > 0){
+            allowance.allowedReceiversId = ++allowedReceiversIdCounter;
+            for (uint i = 0; i < allowedReceivers.length; i++) {
+                isAllowedReceivers[allowance.allowedReceiversId][allowedReceivers[i]] = true;
+            }
+            emit AllowedReceivers(allowance.allowedReceiversId, allowedReceivers);
+        }else{
+            allowance.allowedReceiversId = 0;
+        }
         updateAllowance(msg.sender, delegate, token, allowance);
-        emit SetAllowance(msg.sender, delegate, token, allowanceAmount, resetTimeMin);
+        emit SetAllowance(msg.sender, delegate, token, allowanceAmount, resetTimeMin, allowance.allowedReceiversId);
     }
 
     function getAllowance(address safe, address delegate, address token) private view returns (Allowance memory allowance) {
@@ -136,6 +150,7 @@ contract AllowanceModule is SignatureDecoder {
         allowance.spent = 0;
         allowance.resetTimeMin = 0;
         allowance.lastResetMin = 0;
+        allowance.allowedReceiversId = 0;
         updateAllowance(msg.sender, delegate, token, allowance);
         emit DeleteAllowance(msg.sender, delegate, token);
     }
@@ -168,6 +183,8 @@ contract AllowanceModule is SignatureDecoder {
         uint96 newSpent = allowance.spent + amount;
         // Check new spent amount and overflow
         require(newSpent > allowance.spent && newSpent <= allowance.amount, "newSpent > allowance.spent && newSpent <= allowance.amount");
+        // Check allowed receivers
+        require(allowance.allowedReceiversId == 0 || isAllowedReceivers[allowance.allowedReceiversId][to], "to is not in allowed receivers");
         allowance.spent = newSpent;
         if (payment > 0) {
             // Use updated allowance if token and paymentToken are the same
@@ -288,14 +305,15 @@ contract AllowanceModule is SignatureDecoder {
         return tokens[safe][delegate];
     }
 
-    function getTokenAllowance(address safe, address delegate, address token) public view returns (uint256[5] memory) {
+    function getTokenAllowance(address safe, address delegate, address token) public view returns (uint256[6] memory) {
         Allowance memory allowance = getAllowance(safe, delegate, token);
         return [
             uint256(allowance.amount),
             uint256(allowance.spent),
             uint256(allowance.resetTimeMin),
             uint256(allowance.lastResetMin),
-            uint256(allowance.nonce)
+            uint256(allowance.nonce),
+            allowance.allowedReceiversId // the list of allowed receivers can be retrieved from AllowedReceivers events
         ];
     }
 
@@ -335,6 +353,7 @@ contract AllowanceModule is SignatureDecoder {
                 allowance.spent = 0;
                 allowance.resetTimeMin = 0;
                 allowance.lastResetMin = 0;
+                allowance.allowedReceiversId = 0;
                 updateAllowance(msg.sender, delegate, token, allowance);
                 emit DeleteAllowance(msg.sender, delegate, token);
             }
