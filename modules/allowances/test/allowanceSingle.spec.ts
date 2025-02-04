@@ -54,7 +54,7 @@ describe('AllowanceModule allowanceSingle', () => {
     expect(0).to.equal(await token.balanceOf(alice.address))
     expect(0).to.equal(await token.balanceOf(bob.address))
 
-    // will work when 'to' is an allowed spender
+    // will work when 'to' is an allowed receiver
     await execAllowanceTransfer(allowanceModule, {
       safe: safeAddress,
       token: tokenAddress,
@@ -63,7 +63,7 @@ describe('AllowanceModule allowanceSingle', () => {
       spender: alice,
     })
 
-    // does not work when 'to' is not an allowed spender
+    // does not work when 'to' is not an allowed receiver
     await expect(
       execAllowanceTransfer(allowanceModule, {
         safe: safeAddress,
